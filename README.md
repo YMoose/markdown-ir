@@ -64,7 +64,7 @@ digraph DocIR {
 
 - 全量双向链路（静态文档互转，`Markdown ⇄ IR JSON`）：
   - 正向（`IR → Markdown`）：合法规范的文档语义 IR 经 `Adapter.Emit`（阶段 2）渲染为规范风格的 Markdown 文本，默认保持纯净规范 Markdown（配合隐藏 `IR_old` 快照无感继承块身份，仅按需在关键块显式落盘锚点）供人阅读和编辑。
-  - 反向（`Markdown → IR`）：人修改 Markdown（改字、调整结构、新增段落、手写任意 Markdown 语法）后，经 `Adapter.Parse`（阶段 2）解析并剥离底层引擎私有 AST、还原块 `id`，再由阶段 1 内核 `Normalize` / `Verify` 产出标准语义 IR。
+  - 反向（`Markdown → IR`）：人修改 Markdown（改字、调整结构、新增段落、手写任意 Markdown 语法）后，经 `Adapter.Parse`（阶段 2）解析为引擎无关的 IR 并还原块 `id`，再由阶段 1 内核 `Normalize` / `Verify` 产出标准语义 IR。
 - 增量双向链路（动态改动互转，`git diff ⇄ JSON Patch`）：
   - 人改 Markdown → 提取 JSON Patch：`DiffIR(IR_old, IR_new)` 在 IR 层对比编辑前后的文档树，过滤空行/缩进等纯排版噪音，将原本粗糙的文本 `git diff` 提纯为基于块 `id` 寻址的 JSON Patch。
   - 应用 JSON Patch → 局部更新 Markdown：`ApplyPatch(IR_old, Patch)` 在 IR 树上直接执行块级增删改移补丁，并支持按源码区间 `pos` 局部重印 Markdown。
@@ -76,7 +76,7 @@ digraph DocIR {
    - 核心职责：定义 IR 数据结构、版本升级（`AutoUpgrade`）、Schema 与嵌套约束校验（`Verify`）、保持语义的规范化（`Normalize`）
 2. Markdown → IR 解析器（`Parse`）
    - 输入 → 输出：`Markdown (+ 可选 IR_old)` → `IR + Diagnostics`
-   - 核心职责：解析 Markdown、剥离引擎私有结构、绑定块 `id`、捕获超纲构造进 `raw_*`
+   - 核心职责：解析 Markdown 并构建引擎无关的 IR、绑定块 `id`、捕获超纲构造进 `raw_*`
 3. IR → Markdown 生成器（`Emit`）
    - 输入 → 输出：`IR` → `Markdown`
    - 核心职责：按规范形式写出 Markdown 文本；默认保持纯净规范 Markdown（配合隐藏 `IR_old` 快照无感继承块身份），仅按需在关键块显式落盘身份锚点
