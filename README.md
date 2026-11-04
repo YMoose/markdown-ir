@@ -99,7 +99,7 @@ digraph DocIR {
 
 项目以 [CommonMark 0.31.2](https://spec.commonmark.org/0.31.2/) 为解析与基础结构的基准，在此基础上定义文档内容及其组织关系。核心 IR 独立于具体解析引擎，方言通过扩展机制接入。
 
-架构文档定义各模块如何协作；[语义映射文档](./markdown-ir-semantics.md)定义内容单元是什么、Markdown 结构对应哪些 IR 表示，以及哪些变化具有语义。Parse、Emit、Normalize、Verify 和 DiffIR 共同遵守这些规则。
+架构文档定义各模块如何协作；[语义映射文档](./markdown-ir-semantics.md)定义内容单元是什么、Markdown 结构对应哪些 IR 表示，以及哪些变化具有语义；[语义评审原则与工作流](./markdown-ir-review.md)定义制定和复审语义规则的判断原则与推进顺序。Parse、Emit、Normalize、Verify 和 DiffIR 共同遵守这些规则。
 
 IR 的语义合法性与目标 Markdown 的可表达性分别判断。节点与等价规则先确定，再据此设计解析、规范化和输出。尚未收敛的问题和候选方案分别保留在[本文 §5](#5-待决策的架构合同与候选方案)与[语义映射文档 §6](./markdown-ir-semantics.md#6-待继续定义的语义与映射)，均保持待决策状态。
 
@@ -160,7 +160,7 @@ type Node struct {
 决策原因：
 1. 吸收 LLVM 历史教训与 MLIR 终局抽象：早期 LLVM 因将属性写死为固定位掩码、未预留旁路元数据槽，在 LLVM 2.7（补 `Metadata`）、3.3（属性改开放字典 `AttributeList`）、14–17（Opaque Pointers 剥离指针类型外壳）经历了三次底层结构大手术。MLIR 总结该教训后将节点固定为 `{名称, 属性字典, 值, 嵌套区域, 源码位置}` 五元组，此后新增任何方言与语法均只扩展属性字典键值，永不动摇节点外壳。
 2. 根治 Go `encoding/json` 静默丢字段隐患：若将节点专有属性平铺在顶层，旧版程序反序列化新版包含新顶层字段的 JSON 时，Go 标准库会静默丢弃未定义字段，违反不变量 #3（无静默丢失）。收敛入 `Attrs: map[string]any` 后，配合顶层 `DisallowUnknownFields()`，既能严格拦截顶层拼写错误，又能无损保留未知属性。
-3. `attrs` 与 `meta` 职责正交（对应 MLIR Inherent vs Discardable Attributes）：
+3. `attrs` 与 `meta` 职责分离，互不混用（对应 MLIR Inherent vs Discardable Attributes）：
    - `attrs`：存放定义节点自身文档语义的固有参数（由 `Verify` 按 `type` 严格校验 schema），如 `depth`、`url`、`ordered` 及 `x-*` 扩展块的结构化参数。
    - `meta`：存放不影响文档核心语法结构的附加自定义属性（如块级自定义标签、注释标记、外部引用属性等），值类型限定为 `string | number | boolean | string[]`。未知 `meta` 键必须跨所有转换 Pass 原样透传保留。
    - 系统保留键规范：键名 `markdown-ir`、`id`、`type`、`attrs`、`value`、`children`、`meta`、`fallback`、`pos`、`origin`、`errors` 及前缀 `_`、`sys:` 归系统保留，禁止写入 `meta`。
@@ -449,7 +449,7 @@ VerifyCanonical_D(N_D(x)) 通过
 - 清理空字典的前提是 Schema 允许缺省，且空字典与缺省等价。
 - 带元数据的空文本如何进入合法规范形、何时诊断，仍需明确；候选方案是不自动搬移批注来推测用户意图。
 - 修改带来源信息的节点时，必须定义位置映射、来源失效及保真能力变化，不能保留虚假的有效位置。
-- 同范围强调是否选定固定嵌套顺序、如何重排带附加信息的节点，仍需设计；语义等价规则本身见[语义映射文档 §4.2](./markdown-ir-semantics.md#42-强调的范围分段与层数)。
+- 同范围强调是否选定固定嵌套顺序、如何重排带附加信息的节点，仍需设计；语义等价规则本身见[语义映射文档 §4.3](./markdown-ir-semantics.md#43-强调的范围分段与层数strong--emphasis)。
 
 ### 5.7 fallback 的维护责任建议
 
