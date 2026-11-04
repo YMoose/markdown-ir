@@ -107,20 +107,25 @@ digraph DocIR {
 4. 引擎无关（Engine Agnosticism）：IR 数据结构中不得出现任何特定 Markdown 引擎的私有概念；切换底层引擎不修改 IR 数据定义。
 5. 方言可扩展（Dialect Extensibility）：以 CommonMark 作为基础公共核，支持按需注册并扩展各类 Markdown 方言（如 GFM、数学公式、双链笔记、Callout/容器指令等）的块级与行内节点；扩展新方言不改变 `Node` 物理外壳，且支持跨方言 `fallback` 降级与 `raw_*` 保底。
 
-### 1.4 设计前提与语义审查原则
+### 1.4 设计前提：以 CommonMark 为上位法基准，提炼文档语义
 
-**已确认的项目定位：IR 要从 Markdown 的语法中抽象出文档语义。** 这是本项目的出发点，后续设计与评审应沿用此前提，直接检查节点语义是否完整、明确和自洽。
+**已确认的项目定位：以 CommonMark 规范作为基础结构的“上位法”参考，在此基础上剥离语法表象、提取文档语义。** 这是本项目的出发点，后续设计与评审应沿用此前提，直接检查节点语义是否完整、明确和自洽。
 
-不同语法可以表达同一语义，例如 `**重要**` 与 `__重要__` 都对应加粗节点。把它们归并为相同的内容表示，正是 IR 的职责。原始写法如需保留，由来源保真机制承担；不能为了恢复某种写法而让基础语义依赖具体解析引擎的 AST。
+1. **为什么以 CommonMark 为上位法基准**
+   Markdown 历史上虽无单一的官方标准组织，但 CommonMark（0.31.2）是现代工程界公认的事实标准（de facto standard），也是 GitHub Flavored Markdown（GFM，定义为 CommonMark 的严格超集）及主流解析引擎（goldmark、Lute、markdown-it、micromark、pulldown-cmark 等）的最大公共底座。本规范以 CommonMark 的「第一层块（Container Blocks / Leaf Blocks）+ 第二层行内（Inlines）」两阶段结构模型作为基础核（Base Core）的上位法依据，确保跨引擎结构对齐且无边界歧义。
+
+2. **在 CommonMark 之上做「文档语义提取」而非语法复刻**
+   - **剥离同义异形语法**：CommonMark 本质是一份「语法解析 → HTML 渲染」规范，需兼顾手写容错与多种历史写法；而 `markdown-ir` 是面向结构化编辑与 Diff/Patch 的「语义 IR」。不同语法表达同一文档语义时（例如 ATX `#` 与 Setext `===` 标题、缩进与围栏代码块、`**重要**` 与 `__重要__`、引用式链接 `[文档][ref]` 与直链 `[文档](url)`），在 IR 中归并为统一的语义节点与属性。原始写法如需保留，由旁路来源保真机制（`origin`）承担，不能为了恢复某种写法而让基础语义依赖具体解析引擎的 AST。
+   - **以基础核承载公共语义，以方言承载扩展语义**：真实世界高频使用的表格、任务列表、删除线（GFM）以及数学公式、脚注、双链、Callout 等不在纯净 CommonMark 范围内，通过「CommonMark 基础核 + `x-<dialect>/<op>` 方言扩展」架构统一接入。
 
 语义评审重点如下：
 
 | 审查问题 | 具体例子 |
 |---|---|
-| 同一语义是否存在未解释的重复表示 | `text.value` 中的换行与独立 `break` 如何统一 |
+| 同一语义是否存在未解释的重复表示 | 源码段内行尾统一解析为 `break`，与字符实体解码出的 `text.value` 字符区分 |
 | 字段含义及解释边界是否明确 | `code_block.info` 整体保存哪些信息，哪些解释交给方言 |
-| 语义不同的内容是否被正确区分 | 加粗与普通文字、不同链接目标、不同块顺序 |
-| 合法状态是否有明确语义 | 空段落、空强调、列表起始编号分别表示什么，允许范围是什么 |
+| 语义不同的内容是否被正确区分 | 加粗与普通文字、软换行与普通空格、不同链接目标、不同块顺序 |
+| 合法状态是否有明确语义 | 段落非空约束、空强调、列表起始编号分别表示什么，允许范围是什么 |
 | 规范化是否保持语义与附加信息 | 合并文本时是否改变批注的作用范围 |
 
 IR 的语义合法性与目标 Markdown 的可表达性分别定义：
@@ -222,7 +227,7 @@ type Node struct {
 |---|---|---|---|---|
 | `doc` | 无（根顶层带 `"markdown-ir": "0.0.1"`） | 禁止（`nil`） | `Block[]`（禁止含 `doc`、`list_item`） | 文档唯一根节点 |
 | `heading` | `depth`: `int`（`1..6`，必填） | 禁止 | `Inline[]` | 标题（不区分 ATX/Setext） |
-| `paragraph` | 无 | 禁止 | `Inline[]` | 段落 |
+| `paragraph` | 无 | 禁止 | `Inline[]`（至少 1 个） | 段落（正文行内承载块） |
 | `code_block` | `info?`: `string`（完整的代码块信息字符串，作为一个语义属性）<br>空串默认省略 | `string`（必填） | 禁止 | 代码块（不区分缩进/围栏） |
 | `blockquote` | 无 | 禁止 | `Block[]`（禁止含 `doc`、`list_item`） | 引用容器块 |
 | `list` | `ordered?`: `bool`（默认 `false`）<br>`start?`: `int`（默认 `1`）<br>`tight?`: `bool`（默认 `true`） | 禁止 | `list_item[]`（至少 1 个，仅限 `list_item`） | 有序/无序列表容器 |
@@ -230,6 +235,16 @@ type Node struct {
 | `thematic_break` | 无 | 禁止 | 禁止 | 分割线 |
 | `raw_block` | `format`: `string`（必填：`"markdown"` \| `"html"` \| `"ir-unknown"` \| `"invalid-x-node"`） | `string`（必填） | 禁止 | 块级无损逃生舱 |
 | `x-<dialect>/<op>` | 任意合法 JSON 对象（由对应方言 Schema 校验） | 可选 | 可选（可带 `fallback: Block[]`） | 块级方言扩展节点（名称匹配 `^x-[a-z0-9-]+/[a-z0-9-]+$`） |
+
+块级一等公民与两层结构（已确认）：参照 CommonMark 规范（§3 Blocks and inlines），文档（`doc`）的第一层结构完全由有序的「块级节点（Block Nodes）」构成。块级节点是文档结构骨骼、独立身份（`id`）与块级 Diff/Patch 寻址的最小一等公民；任何行内节点（Inline Nodes）必须依附于行内承载块内部，不得直接出现在 `doc`、`blockquote` 或 `list_item` 下。按结构角色，基础块级一等公民分为三类：
+
+1. **容器块（Container Blocks，对应 CommonMark §5）**：用于组织子块，自身不直接包含行内内容——包括递归承载顶层块的 `blockquote`，以及由 `list` 与其专属子块 `list_item`（同样持有独立块 `id`，但父节点只能是 `list`）构成的列表结构。
+2. **行内承载叶子块（Inline-bearing Leaf Blocks，对应 CommonMark §4.2/§4.3/§4.8）**：作为块级递归的终点，内部组织有序的行内内容（`Inline[]`）——包括 `heading`（归并 ATX 与 Setext 标题）与 `paragraph`。
+3. **原子叶子块（Atomic Leaf Blocks，对应 CommonMark §4.1/§4.4/§4.5/§4.6）**：不含任何子节点——包括承载字面代码文本的 `code_block`（归并缩进与围栏代码块）、承载不透明块级载荷的 `raw_block`（含 CommonMark HTML Block），以及纯结构分隔符 `thematic_break`。
+
+此外，CommonMark §4.7 的链接引用定义（`[foo]: /url "title"`）在语义上属于符号表绑定，解析阶段直接展开至对应的 `link` / `image` 节点，在 IR 内容模型中不生成块级节点。
+
+段落与块间分隔（已确认）：`paragraph` 是文档中独立的正文内容单元，由至少 1 个有序的行内子节点（`Inline[]`）构成，规范形中不允许完全空的 `paragraph[]`。在第一层（块级）解析中，块与块之间的空白行（Blank lines）仅作为块级分隔符（用于结束上一块、开启下一块），无论连续多少个空白行均不会产生空的 `paragraph` 节点。若规范化清理（如删除无附加信息的空 `text`）后导致 `paragraph` 变空，规范化必须失败并返回诊断（保留原输入），不得静默删除携带独立 `id` 或 `meta` 的段落块。
 
 代码块信息（已确认）：完整信息字符串统一保存于 `info`，作为一个语义属性参与内容比较，不另设独立的 `lang` 字段。例如围栏后的 `go linenos` 对应以下 `attrs`：
 
@@ -252,26 +267,29 @@ type Node struct {
 （2）行内节点（Inline Nodes，9 类，禁止持有 `id`）
 
 | `type` | `attrs` 字段定义（类型与默认值） | `value` 约束 | `children` 约束（Content Model） | 对应语义 |
-|---|---|---|---|---|
+| :--- | :--- | :--- | :--- | :--- |
 | `text` | 无 | `string`（必填，规范化后非空） | 禁止 | 纯文本（已解码实体） |
-| `strong` | 无 | 禁止 | `Inline[]`（至少 1 个） | 强强调（加粗） |
-| `emphasis` | 无 | 禁止 | `Inline[]`（至少 1 个） | 强调（斜体） |
+| `strong` | 无 | 禁止 | `Inline[]`（至少 1 个） | 加粗强调 |
+| `emphasis` | 无 | 禁止 | `Inline[]`（至少 1 个） | 斜体强调 |
 | `inline_code` | 无 | `string`（必填） | 禁止 | 行内代码 |
-| `link` | `url`: `string`（必填）<br>`title?`: `string`（默认省略） | 禁止 | `Inline[]`（后代中禁止嵌套 `link`） | 超链接 |
-| `image` | `url`: `string`（必填）<br>`alt`: `string`（必填，允许 `""`）<br>`title?`: `string`（默认省略） | 禁止 | 禁止（`alt` 拍平为纯文本属性，对齐 Lute 与 MDAST） | 图片 |
-| `break` | `hard?`: `bool`（默认 `false` 软换行，`true` 硬换行） | 禁止 | 禁止 | 软换行 / 硬换行 |
+| `link` | `url`: `string`（必填）<br>`title?`: `string` | 禁止 | `Inline[]`（后代中禁止再出现 `link`） | 超链接（引用式链接在此展开） |
+| `image` | `url`: `string`（必填）<br>`alt`: `string`（必填，纯文本）<br>`title?`: `string` | 禁止 | 禁止（`alt` 已拍平为纯文本属性） | 图片（对齐 Lute / MDAST，无子节点） |
+| `break` | `hard?`: `bool`（默认 `false`） | 禁止 | 禁止 | 软换行（`false`）/ 硬换行（`true`） |
 | `raw_inline` | `format`: `string`（必填：`"markdown"` \| `"html"` \| `"ir-unknown"`） | `string`（必填） | 禁止 | 行内无损逃生舱 |
 | `x-<dialect>/<op>` | 任意合法 JSON 对象（由对应方言 Schema 校验） | 可选 | 可选（可带 `fallback: Inline[]`） | 行内方言扩展节点（如行内公式、双链、高亮等） |
 
 相邻加粗的分段（已确认）：同一父节点下，连续相邻的基础 `strong` 节点之间仅有分段差异时，该边界不增加内容语义。例如 `strong("甲") + strong("乙")` 与 `strong("甲乙")` 内容等价，不因加粗范围被分成两段而产生语义 Diff。实际存储节点的合并仍须保留批注等附加信息及其作用范围；内容等价不授权丢弃这些信息。该规则不自动推广到加粗与斜体的嵌套顺序、重复嵌套加粗、相邻链接或代码跨度。
 
-换行语义（已确认）：普通段落中的软换行是独立的内容语义，与普通空格、硬换行分别区分。源码分两行的 `hello` / `world` 与一行的 `hello world` 不属于相同内容；增加、删除或移动软换行都应进入语义 Diff，不能作为纯排版噪音忽略。
+分段与分行的层级边界及换行语义（已确认）：在「第一层块（Block）、第二层行内（Inline）」的两层模型下，**分段**与**分行**属于不同层级的语义操作：
 
-这里的软换行指普通段落内部被解析为段内普通换行的源码换行：它记录段内的换行结构，不要求渲染时强制另起一行。空格是文本字符，与该结构不同。窗口宽度造成的自动折行没有改变源码，也不改变 IR，不属于软换行或内容 Diff。
+- **分段（Paragraph break，第一层块级边界）**：由块间空白行或新块起始触发，将正文切分为两个拥有独立 `id` 的 `paragraph` 块（`Block[p1, p2]`）。
+- **段内分行（Line break，第二层行内节点 `break`）**：发生在同一个行内承载块（如 `paragraph`）内部，不结束当前块、不改变外层块的 `id`。其中 `break.hard=false` 表示段内软换行，`break.hard=true` 表示段内强制换行（如行尾反斜杠 `\` 或至少两个空格加换行）。
 
-`break.hard=false` 表示段内软换行，`break.hard=true` 表示段内强制换行。段落之间的分隔由块结构表达。软换行与空格不能仅因某种 HTML 输出下看起来相同而合并；普通规范化不得把软换行替换为空格。
+普通段落中的软换行是独立的内容语义，与普通空格、硬换行分别区分。源码分两行的 `hello` / `world` 与一行的 `hello world` 不属于相同内容；增加、删除或移动软换行都应进入语义 Diff，不能作为纯排版噪音忽略。这里的软换行记录段内的换行结构，不要求渲染时强制另起一行；空格则是文本字符，与该结构不同。窗口宽度造成的自动折行没有改变源码，也不改变 IR，不属于软换行或内容 Diff。软换行与空格不能仅因某种 HTML 输出下看起来相同而合并；普通规范化不得把软换行替换为空格。
 
-不同源码换行编码（如 LF 与 CRLF）若解析为同一种 `break`，可以具有相同内容语义；这不授权通用规范化改写代码或不透明载荷中的换行。`text.value` 中换行字符与独立 `break` 的统一表示仍待逐项定义。
+不同源码换行编码（如 LF 与 CRLF）若在块内解析为同一种 `break`，具有相同内容语义；这不授权通用规范化改写代码或不透明载荷中的换行。
+
+结构化 `break` 与文本字符换行的边界（已确认）：CommonMark 的块级切分与段内 `break` 切分均发生在源码真实行尾层面（字符实体解码之前）。因此，源码中的段内真实行尾解析为结构化的 `break(hard=false/true)` 节点；而由字符引用（如 `hello&#10;world`）解码得到的 `\n` 属于 `text.value` 内的文本字符数据，不自动提升为 `break` 结构节点（输出时通过字符引用保留其文本字符身份）。相应地，由普通源码解析产生的 `text.value` 不含未拆分的源码行尾，消除了 `text.value` 与 `break` 的重复表示。
 
 #### 2.1.4 Markdown 方言扩展机制（Dialect Architecture）
 
